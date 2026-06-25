@@ -29,7 +29,7 @@ player's shots, can we recover how they were aiming?).
   simulated games of 301 (double-out), and an analysis of **optimal targeting** — when a
   player should aim for treble 20 versus a safer target, with the crossover computed as a
   function of accuracy.
-- **Live in-play odds** — a ball-by-ball match simulator that produces a live win-
+- **Live in-play odds** — a throw-by-throw match simulator that produces a live win-
   probability "worm chart" as a match unfolds.
 - **Bayesian inverse modelling (MCMC)** — the centrepiece: a hand-coded Metropolis-
   Hastings sampler that recovers a player's aim point and consistency from the spatial
