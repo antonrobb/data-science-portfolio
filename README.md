@@ -45,11 +45,30 @@ An end-to-end big data system analysing sentiment in online music communities ac
 * Scored sentiment with two models (VADER and TextBlob) and surfaced results through an interactive dashboard with rolling sentiment curves and word clouds
 * Documented methodology, limitations, and ethical considerations (privacy, representativeness, algorithmic and linguistic bias)
 
+### 5. Modelling Optical Degradation of the Liverpool Telescope — Time Series
+**R · time-series modelling · segmented regression · forecasting**
+
+A time-series analysis of a decade of nightly reflectivity measurements from the Liverpool Telescope, modelling how the mirrors degrade between cleanings, separating genuine measurements from cloud-affected ones, and forecasting when cleaning will next be required.
+
+* Modelled exponential decay between cleaning events using a segmented log-linear model, with cleanings identified as abrupt upward steps in transmission
+* Removed cloud-affected measurements with an iterative, one-sided outlier procedure, refitting after each pass to progressively expose points a single pass would miss
+* Tested for a changing degradation rate on monthly-aggregated data to account for the strong autocorrelation of nightly measurements, giving honest standard errors rather than the over-confident results a naive nightly regression produces
+* Forecast future transmission and the date it will next fall below the operational threshold, with confidence intervals
+
+### 6. Demographic Predictors of Reform UK Vote Share — Multiple Regression
+**R · multiple regression · ANOVA · statistical inference**
+
+A multiple-regression analysis of which constituency-level demographic and socioeconomic characteristics best predict Reform UK's vote share across the 650 UK parliamentary constituencies in the 2024 general election.
+
+* Merged 2024 election results with 2021 census demographics across multiple sources, selecting a focused, non-redundant set of explanatory variables
+* Built a multiple linear regression with model diagnostics, multiple-comparison correction, and selection statistics (adjusted R², AIC, PRESS)
+* Uncovered a suppression effect (deprivation becoming significant only after controlling for other variables) and a sign reversal (the older-population effect flipping between the univariate and multivariate views), illustrating why pairwise relationships mislead when predictors are correlated
+
 ## Skills demonstrated
 
 **Languages:** R, Python
 
-**Statistics & modelling:** Bayesian inference, MCMC, Monte Carlo simulation, hidden Markov models, regression
+**Statistics & modelling:** Bayesian inference, MCMC, Monte Carlo simulation, hidden Markov models, regression, time-series analysis
 
 **Machine learning:** XGBoost / gradient boosting, feature engineering, neural networks
 
