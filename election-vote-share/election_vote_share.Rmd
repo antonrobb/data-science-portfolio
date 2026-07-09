@@ -1,0 +1,283 @@
+---
+title: "Demographic Predictors of Reform UK Vote Share in the 2024 General Election"
+author: "Anton Robb"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 5)
+```
+
+# Introduction
+
+The 2024 UK general election saw Reform UK emerge as a significant electoral force,
+with support varying widely across the country's 650 parliamentary constituencies.
+This project asks a simple question: which demographic and socioeconomic
+characteristics of a constituency best predict how strongly it voted for Reform UK?
+
+To answer it, I combine constituency-level election results with 2021 census
+demographics (age structure, ethnic composition, educational attainment,
+benefit-claimant rates and median wages) and constituency geography. I build a
+multiple linear regression model of Reform's vote share, and pay particular
+attention to a statistical subtlety that turns out to matter a great deal here:
+how the apparent effect of a variable can change, and even reverse, once other
+correlated variables are accounted for.
+
+All data are public, sourced from the House of Commons Library and the 2021
+census. Data preparation, modelling and evaluation are carried out entirely in R.
+
+# Preparing the data
+
+The analysis draws on several separate files, one per data domain, each keyed by a
+constituency identifier code. I load each, keep a focused set of columns to avoid
+redundancy and overfitting, and merge them into a single constituency-level frame.
+
+```{r load-merge}
+library(dplyr)
+
+elec  <- read.csv("election2024.csv")
+age   <- read.csv("age.csv")
+claim <- read.csv("claimants.csv")
+eth   <- read.csv("ethnicity.csv")
+qual  <- read.csv("qualifications.csv")
+wage  <- read.csv("wages.csv")
+
+# Retain a small, non-redundant set of explanatory variables per domain
+age   <- age[,   c("ONSConstID", "pct18.24", "pct65.up")]
+claim <- claim[, c("ONSConstID", "claimant_rate")]
+eth   <- eth[,   c("ONSConstID", "white", "asian", "black")]
+qual  <- qual[,  c("ONSConstID", "Qual4_pct", "Qual5_pct")]
+wage  <- wage[,  c("ONSConstID", "MedianWage")]
+
+elec$Region <- factor(elec$RegionName)
+
+df <- elec |>
+  merge(age,   by = "ONSConstID") |>
+  merge(claim, by = "ONSConstID") |>
+  merge(eth,   by = "ONSConstID") |>
+  merge(qual,  by = "ONSConstID") |>
+  merge(wage,  by = "ONSConstID")
+```
+
+The response variable is Reform's share of the valid vote in each constituency.
+I restrict the analysis to constituencies where Reform actually stood a candidate,
+since a zero vote elsewhere reflects absence rather than lack of support.
+
+```{r response}
+df$vote_share <- df$RUK / df$Valid.votes
+df <- df[df$RUK > 0, ]
+```
+
+I selected the explanatory variables to capture distinct demographic and
+socioeconomic dimensions while avoiding near-duplicates: two age bands (younger and
+older adults), three broad ethnic groups, two educational-attainment measures (at
+opposite ends of the qualification scale), the benefit-claimant rate, median wage,
+and Region as a categorical geographic factor. The aim was breadth of genuinely
+different signals rather than many collinear measures of the same underlying trait.
+
+# Exploring the response
+
+```{r response-dist}
+library(ggplot2)
+
+ggplot(df, aes(vote_share)) +
+  geom_histogram(binwidth = 0.025, fill = "turquoise4", colour = "white") +
+  labs(title = "Distribution of Reform UK vote share across constituencies",
+       x = "Vote share", y = "Count") +
+  theme_minimal()
+
+summary(df$vote_share)
+```
+
+Reform's vote share is unimodal and mildly right-skewed, concentrated between
+roughly 5% and 25% per constituency, with a small number of constituencies where
+Reform performed exceptionally strongly forming a right tail.
+
+# Univariate associations
+
+As a first pass, I examine each continuous variable's association with vote share
+individually: the slope of a simple linear fit, the Pearson correlation, and its
+p-value. This gives a marginal picture, before any variables are considered
+together.
+
+```{r univariate}
+cont_vars <- c("pct18.24", "pct65.up", "white", "asian", "black",
+               "Qual4_pct", "Qual5_pct", "claimant_rate", "MedianWage")
+
+uni <- lapply(cont_vars, function(v) {
+  ct <- cor.test(df$vote_share, df[[v]])
+  data.frame(variable = v,
+             slope = coef(lm(df$vote_share ~ df[[v]]))[2],
+             correlation = unname(ct$estimate),
+             p_value = ct$p.value)
+}) |> do.call(what = rbind)
+
+uni[order(uni$p_value), ]
+```
+
+The strongest single association is with the proportion of residents holding no
+formal qualifications, which is strongly *negatively* correlated with Reform
+support. Several other variables (age structure, ethnic composition, median wage)
+also show clear marginal associations.
+
+# Regional variation
+
+Region is a categorical variable, so I test its association with vote share using a
+one-way analysis of variance, and inspect the regional means.
+
+```{r region}
+aov_region <- aov(vote_share ~ Region, data = df)
+summary(aov_region)
+
+tapply(df$vote_share, df$Region, mean) |> sort()
+```
+
+Region is very strongly associated with Reform support: average vote share differs
+substantially across the country, with the highest support in parts of the North
+and Midlands and the lowest in London and Scotland. Geography clearly carries real
+signal.
+
+# A combined ranking of marginal associations
+
+Bringing the continuous and categorical results together, and correcting the
+p-values for multiple comparisons, gives a ranked view of which variables are most
+strongly associated with vote share when each is considered on its own.
+
+```{r combined-ranking}
+p_region <- summary(aov_region)[[1]]["Region", "Pr(>F)"]
+
+ranking <- rbind(
+  data.frame(variable = cont_vars, p_value = uni$p_value),
+  data.frame(variable = "Region", p_value = p_region)
+)
+ranking$p_adj <- p.adjust(ranking$p_value, method = "bonferroni")
+ranking[order(ranking$p_adj), ]
+```
+
+# Multiple regression
+
+The univariate view is only a starting point, because the explanatory variables are
+themselves correlated with one another. To isolate each variable's *independent*
+contribution, I fit a multiple linear regression including all explanatory
+variables simultaneously.
+
+```{r multi-model}
+multi <- lm(vote_share ~ pct18.24 + pct65.up + white + asian + black +
+              Qual4_pct + Qual5_pct + claimant_rate + MedianWage + Region,
+            data = df)
+summary(multi)
+```
+
+## Model diagnostics
+
+```{r diagnostics, fig.height=6}
+par(mfrow = c(2, 2))
+plot(multi)
+par(mfrow = c(1, 1))
+```
+
+The diagnostic plots show broadly well-behaved residuals: approximately normal with
+only mild departures in the tails, and roughly constant variance. A small number of
+high-leverage constituencies are present but none dominate the fit. (Any single
+constituency with both extreme residual and high leverage would be worth excluding
+and refitting; the diagnostics here do not indicate a case severe enough to distort
+the conclusions.)
+
+## Model summary statistics
+
+```{r model-stats}
+s <- summary(multi)
+e <- residuals(multi); h <- hatvalues(multi)
+data.frame(
+  df_model      = length(coef(multi)) - 1,
+  df_error      = df.residual(multi),
+  R_squared     = s$r.squared,
+  adj_R_squared = s$adj.r.squared,
+  residual_SE   = s$sigma,
+  AIC           = AIC(multi),
+  PRESS         = sum((e / (1 - h))^2)
+)
+```
+
+The model explains a large majority of the variation in Reform vote share across
+constituencies, indicating that constituency demographics account for much of the
+geographic pattern in support.
+
+# Univariate versus multivariate: where the story changes
+
+The most interesting statistical feature of this analysis is how variables behave
+differently in isolation versus in the full model. Comparing each variable's
+covariate-adjusted p-value from the multiple regression against its marginal
+p-value reveals three distinct patterns.
+
+```{r compare}
+coef_tab <- s$coefficients
+p_cont_multi <- coef_tab[cont_vars, "Pr(>|t|)"]
+p_region_multi <- anova(multi)["Region", "Pr(>F)"]
+
+compare <- data.frame(
+  variable = c(cont_vars, "Region"),
+  p_univariate = ranking$p_value[match(c(cont_vars, "Region"), ranking$variable)],
+  p_multivariate = c(p_cont_multi, p_region_multi)
+)
+compare[order(compare$p_multivariate), ]
+```
+
+Three things stand out:
+
+*Variables that stay strong.* Educational attainment, age structure and Region
+remain highly significant in the full model, indicating genuine independent
+associations with Reform support that are not merely proxies for something else.
+
+*A suppressed effect that emerges.* The benefit-claimant rate is weak or
+insignificant on its own but becomes clearly significant once education, age and
+region are held constant. This is a suppression effect: the raw association is
+masked by other variables, and only controlling for them reveals the underlying
+relationship between economic deprivation and vote share.
+
+*Associations that dissolve, and one that reverses.* Some variables that looked
+important in isolation, such as ethnic composition, lose significance in the full
+model, implying their marginal associations were largely explained by correlation
+with education and region. Most strikingly, the older-population share flips sign:
+positively associated with Reform support on its own, but *negatively* associated
+once other variables are controlled for. Older populations tend to co-occur with
+other constituency characteristics (particularly around education and region) that
+themselves drive support, and once those are accounted for, the residual
+partial association with age runs the other way.
+
+# Interpretation
+
+```{r illustrate, fig.height=4}
+par(mfrow = c(1, 2))
+plot(df$Qual5_pct, df$vote_share, pch = 16, col = "turquoise4",
+     xlab = "Proportion with no qualifications", ylab = "Reform vote share",
+     main = "Vote share vs education")
+abline(lm(vote_share ~ Qual5_pct, data = df), col = "firebrick", lwd = 2)
+
+plot(df$pct65.up, df$vote_share, pch = 16, col = "turquoise4",
+     xlab = "Proportion aged 65+", ylab = "Reform vote share",
+     main = "Vote share vs older population")
+abline(lm(vote_share ~ pct65.up, data = df), col = "firebrick", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+Educational composition is the single strongest structural predictor of Reform's
+constituency-level performance, and its effect is robust: it survives controlling
+for age, ethnicity, income and region. The age result is the clearest cautionary
+tale of the analysis. Viewed alone, older constituencies appear more supportive of
+Reform, but this bivariate impression is misleading; once the confounding influence
+of education and region is removed, the partial relationship reverses. It is a
+concrete demonstration of why simple pairwise relationships can mislead when
+explanatory variables are correlated, and why multiple regression, interpreted
+carefully, gives a more trustworthy picture of what independently drives an outcome.
+
+# Notes
+
+Data: 2024 general election results and 2021 census demographics, sourced from the
+House of Commons Library (public). This project began as a piece of university
+coursework and has been rewritten as an independent, self-directed analysis. All
+processing is reproducible from the original public data files in R.

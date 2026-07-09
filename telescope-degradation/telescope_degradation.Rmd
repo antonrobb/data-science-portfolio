@@ -1,0 +1,302 @@
+---
+title: "Modelling Optical Degradation of the Liverpool Telescope"
+author: "Anton Robb"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4)
+```
+
+# Overview
+
+The Liverpool Telescope, operated by Liverpool John Moores University, is a
+2-metre robotic telescope on La Palma in the Canary Islands. Every clear night,
+the total reflectivity of its optical system (the fraction of incident light that
+reaches the focus, referred to here as *transmission*) is measured. As
+atmospheric particles accumulate on the mirrors, transmission steadily declines;
+periodic cleaning and resurfacing restore it in sudden jumps.
+
+This project models that degradation over roughly a decade of measurements. The
+aims are to identify when the mirrors were cleaned, fit a physically motivated
+model of the decay between cleanings, separate genuine measurements from
+cloud-affected ones, test whether the rate of degradation itself changes over
+time, and forecast when transmission will next fall below the operational
+threshold.
+
+The dataset (`telescope.csv`) contains a date (as a Modified Julian Date, MJD)
+and a transmission value between 0 and 1 for each night, with `NA` on nights when
+no measurement was possible.
+
+# Data and initial inspection
+
+```{r load}
+library(ggplot2)
+library(dplyr)
+
+telescope <- read.csv("telescope.csv")
+tel <- telescope[!is.na(telescope$trans), ]
+
+ggplot(tel, aes(mjd, trans)) +
+  geom_line(colour = "dodgerblue3", linewidth = 0.3) +
+  geom_point(size = 0.4, alpha = 0.5) +
+  labs(title = "Telescope transmission over time",
+       x = "Modified Julian Date (MJD)", y = "Transmission") +
+  theme_minimal()
+```
+
+Two features are immediately visible. First, transmission trends downward within
+each interval and then jumps sharply upward at cleaning or resurfacing events.
+Second, a scattering of anomalously low points sits well below the main trend:
+these correspond to partly cloudy nights, where cloud cover reduces the *measured*
+transmission without the telescope's true reflectivity having changed. Both
+features shape the modelling that follows.
+
+# Identifying cleaning events
+
+Cleanings appear as abrupt upward steps in transmission. Inspecting the series,
+the clearest steps occur at approximately the following MJDs, which I take as the
+cleaning boundaries. (A cleaning near the very end of the record is also
+apparent.)
+
+```{r cleans}
+cleans <- c(56430, 57188, 58745, 60540)
+```
+
+These boundaries divide the record into segments, within each of which
+transmission is expected to decay smoothly.
+
+# A physical model of decay between cleanings
+
+Between cleanings, contamination accumulates and transmission is expected to
+decline roughly exponentially in time. Taking the logarithm of transmission
+linearises this exponential decay, so I model `log(transmission)` as a linear
+function of time within each segment, allowing each segment its own intercept
+(the recovery at each cleaning) while sharing a common slope.
+
+```{r model1}
+tel$log_trans <- log(tel$trans)
+tel$segment <- cut(tel$mjd,
+                   breaks = c(min(tel$mjd), cleans, max(tel$mjd)),
+                   include.lowest = TRUE)
+
+model <- lm(log_trans ~ mjd + segment, data = tel)
+
+tel$fit <- exp(predict(model))
+
+ggplot(tel, aes(mjd, trans)) +
+  geom_point(size = 0.4, alpha = 0.4, colour = "dodgerblue3") +
+  geom_line(aes(y = fit), colour = "seagreen", linewidth = 0.7) +
+  labs(title = "Transmission with fitted exponential-decay model",
+       x = "Modified Julian Date (MJD)", y = "Transmission") +
+  theme_minimal()
+```
+
+The model captures the broad decay-and-recover pattern, but it is visibly pulled
+downward by the cloud-affected points, which the next section addresses.
+
+# Separating cloud-affected measurements
+
+Cloud cover can only *reduce* measured transmission, never inflate it, so
+cloud-affected points appear as large negative departures from the model. A model
+check plot makes this concrete.
+
+```{r checkplot, fig.height=6}
+par(mfrow = c(2, 2))
+plot(model)
+par(mfrow = c(1, 1))
+```
+
+The effect is clearest in the Residuals vs Fitted and Q-Q panels, where a heavy
+one-sided negative tail appears: many points fall far below the fit, with no
+matching positive tail, exactly the signature of a process that only ever
+depresses the measurement. The Residuals vs Leverage panel shows these points
+have low leverage, confirming they are measurement artefacts rather than
+influential observations reflecting true changes in mirror performance.
+
+## Iterative outlier removal
+
+A single one-pass cut is sensitive to the fact that the cloud-affected points
+themselves distort the model they are being compared against: while they remain in
+the fit, they inflate the residual spread and pull the fitted line down, so a
+threshold defined in standard deviations is too lenient and leaves cloud points
+behind. I therefore remove them iteratively. At each step I refit the model on the
+currently retained data, recompute residuals, and flag points falling more than a
+fixed number of standard deviations *below* the fit (a one-sided cut, since only
+downward departures indicate cloud). Repeating until the retained set stabilises
+lets the model tighten around the genuine data and progressively expose cloud
+points that a single pass would miss.
+
+```{r iterative-clean}
+# One-sided threshold in residual standard deviations (below the fit only)
+k <- 2
+
+keep <- rep(TRUE, nrow(tel))
+repeat {
+  m <- lm(log_trans ~ mjd + segment, data = tel[keep, ])
+  resid_all <- tel$log_trans - predict(m, newdata = tel)
+  s <- sd(resid_all[keep])
+  new_keep <- resid_all > -k * s   # cloud points sit far BELOW the fit
+  if (identical(new_keep, keep)) break
+  keep <- new_keep
+}
+
+tel$keep <- keep
+model_clean <- lm(log_trans ~ mjd + segment, data = tel[tel$keep, ])
+
+n_removed  <- sum(!tel$keep)
+n_retained <- sum(tel$keep)
+c(removed = n_removed, retained = n_retained)
+```
+
+Iterating to convergence removes more cloud-affected points than a single pass at
+the same threshold, because each refit tightens the residual scale and reveals
+further outliers that the initial, inflated spread had masked.
+
+```{r cleaned-plot}
+tel$pred_trans <- exp(predict(model_clean, newdata = tel))
+
+ggplot(tel, aes(mjd, trans, colour = keep)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_line(aes(y = pred_trans), colour = "seagreen", linewidth = 0.7) +
+  scale_colour_manual(values = c("TRUE" = "dodgerblue3", "FALSE" = "darkorange2"),
+                      labels = c("TRUE" = "Retained", "FALSE" = "Removed (cloud)"),
+                      name = NULL) +
+  labs(title = "Cleaned data with refitted model",
+       x = "Modified Julian Date (MJD)", y = "Transmission") +
+  theme_minimal()
+```
+
+# Does the degradation rate change over time?
+
+A natural question is whether the mirrors degrade at a constant rate or whether the
+rate itself changes. Testing this correctly requires care, because transmission
+measurements are a time series: readings close together in time are correlated
+(short-term trends over timescales of up to about a month), so the nightly
+observations are not independent. Treating them as independent, as a naive
+regression would, badly understates the standard errors and produces
+over-confident p-values, because the *effective* number of independent
+observations is far smaller than the raw count of nights.
+
+## Accounting for non-independence
+
+To address this, I aggregate the cleaned nightly data to monthly means before
+testing for a change in rate. Averaging within calendar months collapses the
+short-term autocorrelation into a series whose points are much closer to
+independent, so the resulting inference reflects the genuine effective sample size
+rather than the inflated nightly count. This is a deliberately conservative
+approach: it discards some within-month information in exchange for honest standard
+errors and p-values.
+
+```{r monthly-aggregate}
+library(lubridate)
+
+# Reconstruct a calendar date from MJD (MJD epoch: 1858-11-17)
+tel_clean <- tel[tel$keep, ]
+tel_clean$date  <- as.Date(tel_clean$mjd, origin = as.Date("1858-11-17"))
+tel_clean$month <- floor_date(tel_clean$date, "month")
+
+monthly <- tel_clean %>%
+  group_by(month, segment) %>%
+  summarise(mjd = mean(mjd), log_trans = mean(log_trans), n = n(),
+            .groups = "drop")
+```
+
+With a near-independent monthly series, I compare a constant-rate model (linear in
+time) against one allowing the rate to change (adding a quadratic term in time).
+
+```{r rate-test}
+m_linear <- lm(log_trans ~ mjd + segment, data = monthly)
+m_quad   <- lm(log_trans ~ mjd + I(mjd^2) + segment, data = monthly)
+
+anova(m_linear, m_quad)
+summary(m_quad)$coefficients["I(mjd^2)", ]
+```
+
+Fitting on the monthly-aggregated series, the quadratic term tests whether the
+degradation rate is genuinely changing over time rather than reflecting
+autocorrelated nightly noise. Because the standard errors here are based on a
+realistic effective sample size, any significance in the quadratic term is a
+credible indication of a secular change in the degradation rate, not an artefact of
+treating correlated nightly readings as independent.
+
+```{r resid-time}
+ggplot(data.frame(mjd = monthly$mjd, r = residuals(m_linear)),
+       aes(mjd, r)) +
+  geom_point(colour = "dodgerblue3", size = 0.8) +
+  geom_hline(yintercept = 0, colour = "darkorange2") +
+  labs(title = "Monthly residuals from the constant-rate model",
+       x = "Modified Julian Date (MJD)", y = "Residual (log scale)") +
+  theme_minimal()
+```
+
+Structure in these residuals over long timescales (as opposed to random scatter)
+would corroborate a changing degradation rate; the quadratic test quantifies it.
+
+# Forecasting
+
+## Transmission on a target date
+
+Using the model fitted to the cleaned, aggregated data, I predict transmission on
+1 January 2026 (MJD 61041) with a 95% confidence interval, back-transforming from
+the log scale.
+
+```{r forecast-date}
+latest_seg <- tail(levels(monthly$segment), 1)
+newdata <- data.frame(mjd = 61041,
+                      segment = factor(latest_seg, levels = levels(monthly$segment)))
+
+pred <- predict(m_quad, newdata = newdata, interval = "confidence", level = 0.95)
+exp(pred)
+```
+
+## When will transmission next fall below 15%?
+
+The telescope's operational requirement is that transmission stays above 15%.
+Assuming no further cleaning, I project the model forward to find the date at which
+predicted transmission crosses this threshold, with a confidence interval derived
+from the model's prediction bounds.
+
+```{r forecast-threshold}
+future_mjd <- seq(max(monthly$mjd), max(monthly$mjd) + 2000, by = 1)
+future <- data.frame(mjd = future_mjd,
+                     segment = factor(latest_seg, levels = levels(monthly$segment)))
+
+fp <- exp(predict(m_quad, newdata = future, interval = "confidence", level = 0.95))
+threshold <- 0.15
+
+cross <- data.frame(
+  fit   = future_mjd[which(fp[, "fit"] < threshold)[1]],
+  lower = future_mjd[which(fp[, "upr"] < threshold)[1]],
+  upper = future_mjd[which(fp[, "lwr"] < threshold)[1]]
+)
+cross
+as.Date(unlist(cross), origin = as.Date("1858-11-17"))
+```
+
+The point estimate and interval give the expected date, and its uncertainty, at
+which the mirrors would need attention to stay within the operational requirement.
+
+# Summary
+
+Transmission between cleanings follows a clear exponential decay, well captured by
+a log-linear model segmented at the cleaning events. Cloud-affected nights, which
+only ever depress the measurement, are best removed iteratively: refitting after
+each cut tightens the model and exposes further cloud points that a single pass
+leaves behind. Crucially, testing whether the degradation rate changes over time
+requires accounting for the strong autocorrelation of nightly measurements;
+aggregating to monthly means before inference yields an honest effective sample
+size and avoids the over-confident conclusions a naive nightly regression would
+produce. The final model supports forecasting both the transmission on a given date
+and the date at which cleaning will next be required.
+
+# Notes
+
+Data: nightly transmission measurements from the Liverpool Telescope, provided by
+Liverpool John Moores University and included here with permission. This project
+began as a piece of university coursework and has been reworked as an independent
+analysis.
