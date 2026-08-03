@@ -2,7 +2,7 @@ Anton Robb — Data Science & Statistical Modelling Portfolio
 
 A collection of projects from my MSc Data Science (Liverpool John Moores University), spanning Bayesian statistics, machine learning, and big data engineering. My focus is on probabilistic modelling, simulation, and turning messy real-world data into reliable insight, with a particular interest in applying statistical methods to sport.
 
-Background: MSc Data Science (predicted Distinction) · BSc Mathematics with Statistics (University of Nottingham) · 2.5 years as a Data Analyst at BDO UK.
+Background: MSc Data Science (predicted Distinction) · BSc Mathematics with Statistics (University of Nottingham) · Over 2 years as a Data Analyst at BDO UK.
 
 ## Projects
 
