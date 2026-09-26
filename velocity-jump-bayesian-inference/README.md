@@ -7,10 +7,9 @@ rate. The switching itself is never seen. This project derives an exact likeliho
 that model, implements it alongside three truncated approximations from the published
 literature, and compares all four under a common Bayesian sampler.
 
-💻 **[R code](#code)**
+**[Full report (PDF)](Dissertation_Report.pdf)** · **[R code](#code)**
 
-> **Note:** the full report is not yet published here. It will be added once the
-> mark has been finalised. The code, figures and findings below are complete.
+Awarded 82%, the highest mark in the cohort. The results are currently being prepared for journal submission.
 
 ## Highlights
 
