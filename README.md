@@ -2,7 +2,7 @@
 
 A collection of projects from my MSc Data Science (Liverpool John Moores University), spanning Bayesian statistics, stochastic modelling, machine learning, and big data engineering. My focus is on probabilistic modelling, simulation, and turning messy real-world data into reliable insight, with a particular interest in applying statistical methods to sport.
 
-Background: MSc Data Science (predicted Distinction) · BSc Mathematics with Statistics (University of Nottingham) · over 2 years as a Data Analyst at BDO UK.
+Background: MSc Data Science (Distinction) · BSc Mathematics with Statistics (University of Nottingham) · over 2 years as a Data Analyst at BDO UK.
 
 ## Projects
 
@@ -17,7 +17,7 @@ A particle moves at one of two constant velocities, switching between them at ra
 * Verified the derivation three ways, each computed by a route independent of the formula itself: against 400,000 simulated paths, against exact normalisation, and against a separately implemented approximation onto which it converges
 * Built the full pipeline across seven base-R modules: Gillespie simulation, four likelihood implementations, and adaptive Metropolis MCMC recovering velocity, switching-rate and measurement-noise parameters
 * Found that the zero-switch approximation is structurally misspecified, with biases that persist as the sample grows, while the truncated approximations' biases are sample-size artefacts that vanish by N = 1600. More data cannot fix a misspecified likelihood
-* MSc dissertation, supervised by Dr Ivo Siekmann.
+* MSc dissertation, supervised by Dr Ivo Siekmann. Awarded 82%, the highest mark in the cohort. Currently being prepared for journal submission.
 
 ### 2. Target Practice — Monte Carlo Simulation of Archery & Darts
 **R · Monte Carlo simulation · Bayesian inference · MCMC**
